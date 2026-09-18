@@ -78,6 +78,13 @@ def apply():
         commit_sha=get_commit_sha(),
     )
 
+@app.route('/api/pool', methods=['GET'])
+def api_pool():
+    return {
+        'available_pool': AVAILABLE_POOL,
+        'currency': 'USD',
+        'status': 'operational',
+    }
 
 @app.route("/health", methods=["GET"])
 def health():
