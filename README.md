@@ -26,16 +26,36 @@ Automated cloud-native fintech web service that manages a communal micro-financi
 
 ---
 
-## CI/CD Pipeline
+## Architecture & CI/CD Pipeline Diagram
 
-git push (main)
-│
-▼
-[Job 1: test] ──> flake8 Lint ──> pytest -v
-│
-├─► (Pass) ──► [Job 2: deploy (needs: test)] ──► Render Webhook ──► Live Site
-│
-└─► (Fail) ──► Pipeline Blocked (Deployment Skipped)
+```text
+[ Developer Push / PR to main ]
+              |
+              v
+[ GitHub Actions Runner (Ubuntu Latest / Python 3.11) ]
+              |
+       +------+------+
+       |             |
+       v             v
+  [ Lint Job ]  [ Unit Tests ]
+   (flake8)        (pytest)
+       |             |
+       +------+------+
+              |
+              v
+     [ Quality Gate Check ]
+      (needs: test passed?)
+        /             \
+     YES               NO (Exit Code 1)
+      |                 |
+      v                 v
+[ Trigger Render Hook ] [ Block Deployment ]
+      |                 |
+      v                 v
+[ Live Production App ] [ Production Protected ]
+```
+
+
 
 - **Continuous Integration:** Every push and pull request runs `flake8` linting and `pytest` test suites.
 - **Continuous Deployment:** On passing `main` branch builds, GitHub Actions calls the Render Deploy Hook. Render native auto-deploy is disabled to guarantee no untested code reaches production.
