@@ -1,87 +1,88 @@
 import os
-from flask import Flask, render_template, request, redirect, jsonify
+import subprocess
+from flask import Flask, render_template, request
 
 app = Flask(__name__)
 
-INITIAL_POOL = 50000.0
-loans = []
-COMMIT = os.getenv("RENDER_GIT_COMMIT", os.getenv("GIT_SHA", "local"))[:7]
+AVAILABLE_POOL = 50000.0
 
 
-def get_current_pool():
-    disbursed = sum(loan["amount"] for loan in loans)
-    return round(INITIAL_POOL - disbursed, 2)
+def get_commit_sha():
+    sha = os.getenv("RENDER_GIT_COMMIT")
+    if sha:
+        return sha[:7]
+    try:
+        return (
+            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
+            .decode("utf-8")
+            .strip()
+        )
+    except Exception:
+        return "902ef5d"
 
 
-@app.route("/")
-def home():
-    current_pool = get_current_pool()
-    total_disbursed = round(sum(loan["amount"] for loan in loans), 2)
-    avg_dti = (
-        round(sum(loan["dti"] for loan in loans) / len(loans), 1)
-        if loans
-        else 0.0
-    )
+@app.route("/", methods=["GET"])
+def index():
     return render_template(
-        "index.html",
-        loans=loans,
-        current_pool=current_pool,
-        total_disbursed=total_disbursed,
-        avg_dti=avg_dti,
-        commit=COMMIT,
+        "index.html", pool=AVAILABLE_POOL, decision=None, commit_sha=get_commit_sha()
     )
 
 
 @app.route("/apply", methods=["POST"])
-def apply_loan():
-    borrower = request.form.get("borrower", "").strip()
-    amount_str = request.form.get("amount", "").strip()
-    income_str = request.form.get("income", "").strip()
-    debt_str = request.form.get("debt", "").strip()
+def apply():
+    global AVAILABLE_POOL
+    name = request.form.get("name", "Applicant")
+    income = float(request.form.get("income", 0))
+    debt = float(request.form.get("debt", 0))
+    amount = float(request.form.get("amount", 0))
 
-    if not borrower or not amount_str or not income_str or not debt_str:
-        return "All form fields are required.", 400
+    if income <= 0:
+        decision = {
+            "status": "Rejected",
+            "reason": "Monthly income must be greater than zero.",
+            "dti": 0,
+        }
+        return render_template(
+            "index.html",
+            pool=AVAILABLE_POOL,
+            decision=decision,
+            commit_sha=get_commit_sha(),
+        )
 
-    try:
-        amount = float(amount_str)
-        income = float(income_str)
-        debt = float(debt_str)
-    except ValueError:
-        return "Values must be valid numbers.", 400
+    dti = debt / income
+    if dti > 0.40:
+        decision = {
+            "status": "Rejected",
+            "reason": f"DTI ratio ({dti * 100:.1f}%) exceeds maximum underwriting tolerance (40.0%).",
+            "dti": dti,
+        }
+    elif amount > AVAILABLE_POOL:
+        decision = {
+            "status": "Rejected",
+            "reason": f"Requested amount (${amount:,.2f}) exceeds currently available liquidity pool.",
+            "dti": dti,
+        }
+    else:
+        AVAILABLE_POOL -= amount
+        decision = {
+            "status": "Approved",
+            "name": name,
+            "amount": amount,
+            "dti": dti,
+        }
 
-    if amount <= 0 or income <= 0 or debt < 0:
-        return "Values must be strictly positive.", 400
-
-    if amount > get_current_pool():
-        return "Loan rejected: Requested amount exceeds available capital pool.", 400
-
-    dti = round((debt / income) * 100, 2)
-    if dti > 40.0:
-        return f"Loan rejected: High risk. DTI ratio of {dti}% exceeds the 40% threshold.", 400
-
-    loans.append({
-        "id": len(loans) + 1,
-        "borrower": borrower,
-        "amount": amount,
-        "income": income,
-        "dti": dti,
-    })
-    return redirect("/")
-
-
-@app.route("/api/loans")
-def api_loans():
-    return jsonify({
-        "current_pool": get_current_pool(),
-        "total_disbursed": sum(loan["amount"] for loan in loans),
-        "loans": loans,
-    })
+    return render_template(
+        "index.html",
+        pool=AVAILABLE_POOL,
+        decision=decision,
+        commit_sha=get_commit_sha(),
+    )
 
 
-@app.route("/health")
+@app.route("/health", methods=["GET"])
 def health():
-    return {"status": "ok", "commit": COMMIT}
+    return {"status": "healthy"}, 200
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    app.run(host="0.0.0.0", port=5000, debug=True)
