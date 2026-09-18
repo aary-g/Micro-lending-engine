@@ -1,3 +1,4 @@
+# CI integration test suite
 from app import app
 
 
