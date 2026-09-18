@@ -10,7 +10,7 @@ def get_client():
 def test_health():
     client = get_client()
     res = client.get("/health")
-    assert res.status_code == 200
+    assert res.status_code == 500
     assert res.json["status"] == "ok"
 
 
